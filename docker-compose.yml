@@ -1,0 +1,110 @@
+# Testsetup: Verhalten von Consumern nach Ablauf der Consumer-Offsets
+# (offsets.retention.minutes + auto.offset.reset).
+#
+# Consumer-Werte mit ${VAR:-default} können ohne Datei-Änderung per Shell/.env
+# überschrieben werden, z. B.:
+#   KAFKA_AUTO_OFFSET_RESET=earliest docker compose up -d consumer
+# (Achtung: "docker compose start" übernimmt KEINE geänderten Env-Vars,
+#  dafür "up -d <service>" verwenden, das den Container neu erzeugt.)
+
+services:
+  kafka:
+    image: apache/kafka:3.9.1
+    hostname: kafka
+    ports:
+      - "9094:9094"   # Zugriff vom Host (z. B. Producer/Consumer aus der IDE)
+    environment:
+      # --- KRaft Single-Node (Broker + Controller in einem Prozess) ---
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+
+      # --- Offset-Retention: der Kern des Experiments ---
+      # Wie lange committete Offsets einer LEEREN Gruppe (keine aktiven Member)
+      # aufbewahrt werden. Default 10080 (7 Tage); hier 2 Minuten.
+      KAFKA_OFFSETS_RETENTION_MINUTES: 2
+      # Wie oft der Broker nach abgelaufenen Offsets sucht. Default 600000 (10 min).
+      KAFKA_OFFSETS_RETENTION_CHECK_INTERVAL_MS: 10000
+      # Kein Warten beim ersten Rebalance einer neuen Gruppe (Default 3000 ms).
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+      # --- Single-Broker: interne Topics ohne Replikation ---
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+
+      # Fallback, falls das Topic vor dem Producer (NewTopic-Bean) angefragt wird.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: ${KAFKA_TOPIC_PARTITIONS:-1}
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    ports:
+      - "8090:8080"   # http://localhost:8090
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  producer:
+    build:
+      context: .
+      args:
+        MODULE: kafka-producer
+    ports:
+      - "8080:8080"   # POST http://localhost:8080/send?count=N
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: demo-topic
+      # Partitionen des Topics (NewTopic-Bean; wirkt nur beim Neuanlegen).
+      KAFKA_TOPIC_PARTITIONS: ${KAFKA_TOPIC_PARTITIONS:-1}
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  consumer:
+    build:
+      context: .
+      args:
+        MODULE: kafka-consumer
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: demo-topic
+      # Consumer-Group; neue Group-ID = "frische" Gruppe ohne Offsets.
+      KAFKA_GROUP_ID: ${KAFKA_GROUP_ID:-demo-group}
+      # Startposition, wenn KEIN (gültiger) committeter Offset existiert:
+      #   latest   -> nur neue Nachrichten (Nachrichten "dazwischen" gehen verloren)
+      #   earliest -> ab Anfang des Logs (Duplikate möglich)
+      #   none     -> Exception (NoOffsetForPartitionException)
+      KAFKA_AUTO_OFFSET_RESET: ${KAFKA_AUTO_OFFSET_RESET:-latest}
+      # true = Kafka-Client committet selbst periodisch, Spring AckMode wird dann ignoriert.
+      KAFKA_ENABLE_AUTO_COMMIT: ${KAFKA_ENABLE_AUTO_COMMIT:-false}
+      # Commit-Intervall in ms (nur bei enable.auto.commit=true relevant).
+      KAFKA_AUTO_COMMIT_INTERVAL_MS: ${KAFKA_AUTO_COMMIT_INTERVAL_MS:-5000}
+      # Spring-Commit-Strategie (nur bei enable.auto.commit=false):
+      # RECORD | BATCH | TIME | COUNT | COUNT_TIME | MANUAL | MANUAL_IMMEDIATE
+      KAFKA_LISTENER_ACK_MODE: ${KAFKA_LISTENER_ACK_MODE:-BATCH}
+      # read_uncommitted | read_committed (relevant bei transaktionalen Producern).
+      KAFKA_ISOLATION_LEVEL: ${KAFKA_ISOLATION_LEVEL:-read_uncommitted}
+      # DEBUG: Join/Sync/Commit/Offset-Fetch der Gruppe.
+      LOG_LEVEL_CONSUMER_COORDINATOR: DEBUG
+      # INFO: hier erscheint "Resetting offset for partition ...".
+      LOG_LEVEL_SUBSCRIPTION_STATE: INFO
+    depends_on:
+      kafka:
+        condition: service_healthy
+      producer:
+        condition: service_started   # Producer legt das Topic an

@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: kafka-consumer
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9094}
+    consumer:
+      group-id: ${KAFKA_GROUP_ID:demo-group}
+      auto-offset-reset: ${KAFKA_AUTO_OFFSET_RESET:latest}
+      enable-auto-commit: ${KAFKA_ENABLE_AUTO_COMMIT:false}
+      auto-commit-interval: ${KAFKA_AUTO_COMMIT_INTERVAL_MS:5000}
+      isolation-level: ${KAFKA_ISOLATION_LEVEL:read_uncommitted}
+    listener:
+      ack-mode: ${KAFKA_LISTENER_ACK_MODE:BATCH}
+
+app:
+  topic:
+    name: ${KAFKA_TOPIC:demo-topic}
+
+logging:
+  level:
+    org.apache.kafka.clients.consumer.internals.ConsumerCoordinator: ${LOG_LEVEL_CONSUMER_COORDINATOR:DEBUG}
+    org.apache.kafka.clients.consumer.internals.SubscriptionState: ${LOG_LEVEL_SUBSCRIPTION_STATE:INFO}

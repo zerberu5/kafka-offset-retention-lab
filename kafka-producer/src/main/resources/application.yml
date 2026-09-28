@@ -1,0 +1,13 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: kafka-producer
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9094}
+
+app:
+  topic:
+    name: ${KAFKA_TOPIC:demo-topic}
+    partitions: ${KAFKA_TOPIC_PARTITIONS:1}
