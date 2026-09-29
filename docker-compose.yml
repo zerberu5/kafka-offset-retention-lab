@@ -1,16 +1,22 @@
+version: "2.4"   # Compose-Dateiformat 2.4: läuft mit docker-compose >= 1.21 (Docker 19.03) und Compose v2
+
 # Testsetup: Verhalten von Consumern nach Ablauf der Consumer-Offsets
 # (offsets.retention.minutes + auto.offset.reset).
 #
 # Consumer-Werte mit ${VAR:-default} können ohne Datei-Änderung per Shell/.env
 # überschrieben werden, z. B.:
-#   KAFKA_AUTO_OFFSET_RESET=earliest docker compose up -d consumer
-# (Achtung: "docker compose start" übernimmt KEINE geänderten Env-Vars,
+#   KAFKA_AUTO_OFFSET_RESET=earliest docker-compose up -d consumer
+# (Achtung: "docker-compose start" übernimmt KEINE geänderten Env-Vars,
 #  dafür "up -d <service>" verwenden, das den Container neu erzeugt.)
 
 services:
   kafka:
     image: apache/kafka:3.9.1
     hostname: kafka
+    # Nötig für Docker < 20.10: dessen altes Seccomp-Profil blockiert Syscalls neuerer
+    # Alpine/glibc-Versionen (faccessat2, clone3) -> "file not writable", Thread-Fehler.
+    security_opt:
+      - seccomp:unconfined
     ports:
       - "9094:9094"   # Zugriff vom Host (z. B. Producer/Consumer aus der IDE)
     environment:
@@ -50,6 +56,8 @@ services:
 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
+    security_opt:
+      - seccomp:unconfined   # siehe kafka
     ports:
       - "8090:8080"   # http://localhost:8090
     environment:

@@ -16,8 +16,16 @@ Isolation-Level, Log-Level) stehen kommentiert in `docker-compose.yml`. Sie werd
 über Platzhalter in `application.yml` gelesen und lassen sich deshalb ohne Rebuild
 aus der Shell oder einer `.env`-Datei überschreiben.
 
-> **Wichtig:** `docker compose start` übernimmt **keine** geänderten Env-Vars.
-> Für neue Werte `docker compose up -d consumer` verwenden, das den Container neu erzeugt.
+> **Wichtig:** `docker-compose start` übernimmt **keine** geänderten Env-Vars.
+> Für neue Werte `docker-compose up -d consumer` verwenden, das den Container neu erzeugt.
+
+## Voraussetzungen
+
+- Docker ab 19.03 mit `docker-compose` ab 1.21 (Compose-Dateiformat 2.4). Mit Compose v2
+  funktioniert `docker compose` genauso, dort erscheint nur eine harmlose Warnung zu `version`.
+- Getestet mit Docker 19.03.13 und docker-compose 1.26 sowie mit aktuellem Docker und Compose v2.
+- Wegen Docker 19.03: Die eigenen Images basieren auf Ubuntu 20.04 (`*-focal`). Kafka und
+  kafka-ui laufen mit `seccomp:unconfined`, sonst scheitern sie am alten Seccomp-Profil.
 
 ## Hintergrund
 
@@ -54,9 +62,9 @@ Alle Befehle werden im Projektverzeichnis ausgeführt.
 ### 1. Starten, senden, verarbeiten
 
 ```bash
-docker compose up -d --build
+docker-compose up -d --build
 curl -X POST 'localhost:8080/send?count=3'
-docker compose logs consumer | grep -E 'Partition assigned|Received partition'
+docker-compose logs consumer | grep -E 'Partition assigned|Received partition'
 scripts/groups.sh
 ```
 
@@ -66,7 +74,7 @@ Der Consumer loggt `Received partition=0 offset=0..2`. In der Gruppe steht
 ### 2. Consumer stoppen
 
 ```bash
-docker compose stop consumer
+docker-compose stop consumer
 scripts/groups.sh                # "has no active members", CURRENT-OFFSET 3
 scripts/groups.sh demo-group --state   # STATE Empty -> ab jetzt läuft die Retention
 ```
@@ -84,7 +92,7 @@ scripts/groups.sh
 Direkt im Container geht das auch ohne Skript:
 
 ```bash
-docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+docker-compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh \
   --bootstrap-server localhost:9092 --describe --group demo-group
 ```
 
@@ -99,8 +107,8 @@ curl -X POST 'localhost:8080/send?count=5'   # landen auf Offset 3..7
 ### 5. Consumer starten: die Nachrichten aus Schritt 4 werden übersprungen
 
 ```bash
-docker compose start consumer
-docker compose logs consumer --since 1m | grep -E 'Found no committed|Resetting offset|Partition assigned|Received partition'
+docker-compose start consumer
+docker-compose logs --tail=100 consumer | grep -E 'Found no committed|Resetting offset|Partition assigned|Received partition'
 ```
 
 Erwartet:
@@ -125,19 +133,19 @@ Offsets 3 bis 7 sind für diese Gruppe verloren, obwohl sie noch im Topic liegen
 ### 6. Gegenprobe mit `earliest`
 
 ```bash
-docker compose stop consumer
+docker-compose stop consumer
 sleep 150                                    # Offsets erneut ablaufen lassen
 scripts/groups.sh                            # "does not exist"
 curl -X POST 'localhost:8080/send?count=2'
-KAFKA_AUTO_OFFSET_RESET=earliest docker compose up -d consumer
-docker compose logs consumer --since 1m | grep -E 'Resetting offset|Partition assigned|Received partition'
+KAFKA_AUTO_OFFSET_RESET=earliest docker-compose up -d consumer
+docker-compose logs --tail=100 consumer | grep -E 'Resetting offset|Partition assigned|Received partition'
 ```
 
 Erwartet: `Resetting offset ... to position FetchPosition{offset=0, ...}` und
 `start position=0 = log begin`. Danach verarbeitet der Consumer **alle** Nachrichten ab
 Offset 0 neu, einschließlich der bereits verarbeiteten (Duplikate).
 
-Zurück zu `latest`: `docker compose up -d consumer` ohne die Variable.
+Zurück zu `latest`: `docker-compose up -d consumer` ohne die Variable.
 
 ### 7. Wiederherstellung per `--reset-offsets`
 
@@ -145,13 +153,13 @@ Szenario: Nach Schritt 5 sollen die übersprungenen Offsets 3 bis 7 doch noch ve
 werden. `--reset-offsets` funktioniert nur, wenn die Gruppe **keine aktiven Member** hat.
 
 ```bash
-docker compose stop consumer
+docker-compose stop consumer
 ```
 
 Eine Shell im Kafka-Container öffnen:
 
 ```bash
-docker compose exec kafka bash
+docker-compose exec kafka bash
 cd /opt/kafka/bin
 ```
 
@@ -187,8 +195,8 @@ Danach **zügig** starten. Die gerade gesetzten Offsets gehören zu einer leeren
 verfallen sonst nach 2 min wieder.
 
 ```bash
-docker compose start consumer
-docker compose logs consumer --since 1m | grep -E 'committed offset|Partition assigned|Received partition'
+docker-compose start consumer
+docker-compose logs --tail=100 consumer | grep -E 'committed offset|Partition assigned|Received partition'
 ```
 
 Erwartet: `Setting offset for partition demo-topic-0 to the committed offset FetchPosition{offset=3, ...}`,
@@ -201,7 +209,7 @@ exportieren und per `--from-file plan.csv` anwenden.
 ## Aufräumen
 
 ```bash
-docker compose down -v
+docker-compose down -v
 ```
 
 ## Hilfsskript
